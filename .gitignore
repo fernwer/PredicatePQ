@@ -28,6 +28,15 @@
 !CMakeLists.txt
 !Makefile
 
+!configs
+!configs/**
+
+!apps
+!apps/**
+
+!cmake
+!cmake/**
+
 !*.md
 !**/*.mde 
 

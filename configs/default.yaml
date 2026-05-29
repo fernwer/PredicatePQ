@@ -1,0 +1,66 @@
+system:
+  log_level: info
+  threads: 0              # 0 => use all physical cores
+  numa_aware: false
+
+index:
+  dim: 128
+  ntotal: 1000000
+  nlist: 4096
+  pq_m: 16
+  pq_nbits: 8
+  train_n: 200000
+
+planner:
+  tau: 0.50
+  C_scalar: 1.0
+  C_pq: 2.0
+  C_io: 5.0
+  sample_ratio: 0.01
+  N_min: 64
+
+engine:
+  nprobe: 32
+  candidate_budget: 4096
+  min_geo_floor: 16
+  alpha: 0.70
+  sample_ratio: 0.01
+  sample_nmin: 64
+
+scalar:
+  backend: arrow
+  allow_missing_column: false
+  parser:
+    case_insensitive_keywords: true
+    enable_in: true
+    enable_parentheses: true
+
+refiner:
+  type: io_uring          # io_uring | mmap
+  io_uring:
+    queue_depth: 256
+    submit_batch: 64
+    max_merge_vecs: 16
+    max_inflight: 256
+    use_o_direct: false
+  mmap:
+    madvise_random: true
+
+simd:
+  transpose:
+    enable: true
+    prefer_avx512: true
+    fallback_avx2: true
+    microbench_rounds: 2000
+
+update:
+  enable: true
+  delta:
+    vec_file: "delta_vectors.fbin"
+    flush_threshold: 100000
+  tombstone:
+    enabled: true
+  compaction:
+    trigger_deleted_ratio: 0.20
+    trigger_delta_size: 1000000
+    rewrite_vectors: true
