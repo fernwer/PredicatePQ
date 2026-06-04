@@ -1,18 +1,21 @@
-# PredicatePQ C++ Prototype
+# PredicatePQ (C++ Prototype)
 
-`PredicatePQ` is a disk-resident hybrid retrieval prototype implementing:
+`PredicatePQ` is a disk-resident hybrid retrieval prototype in C++.
 
-* Adaptive plan selection: Pre-Filtering / Post-Filtering
-* Cluster-aligned pruning: `ClusterReduce`
-* PQ scan with SIMD-friendly on-the-fly transpose
-* Batch-oriented SSD refinement: `io_uring` / `mmap`
-* Update path: delta buffer + tombstone + compaction
+This repository implements core components described in the paper:
 
-This is a **system prototype**, not a FAISS-only wrapper. The hybrid execution path, planner, cluster operators, and refinement scheduler are implemented in this project.
+* Adaptive planning (`Pre-Filtering` / `Post-Filtering`)
+* Cluster-aligned pruning (`ClusterReduce`)
+* PQ scan + SIMD on-the-fly transpose
+* Batch-oriented refinement (`io_uring` / `mmap`)
+* Update path (`delta buffer + tombstone + compaction`)
+
+> **Note:** This is a **single-binary prototype** build.
+> There are no `apps/` directories or test scripts.
 
 ---
 
-## 1. Project Layout
+## 1. Project Structure
 
 ```text
 predicatepq/
@@ -24,38 +27,51 @@ predicatepq/
 │   └── default.yaml
 ├── include/
 │   └── predicatepq/
-│       └── ...
-├── src/
-│   └── ...
-├── apps/
-│   ├── build_index.cpp
-│   ├── query_cli.cpp
-│   ├── benchmark.cpp
-│   └── microbench_transpose.cpp
-└── tests/
-    └── ...
+│       ├── types.hpp
+│       ├── predicate.hpp
+│       ├── scalar_store.hpp
+│       ├── metadata.hpp
+│       ├── planner.hpp
+│       ├── cluster_reduce.hpp
+│       ├── pq_scanner.hpp
+│       ├── simd_transpose.hpp
+│       ├── refiner.hpp
+│       ├── build_layout.hpp
+│       ├── engine.hpp
+│       └── update_manager.hpp
+└── src/
+    ├── main.cpp
+    ├── predicate/predicate.cpp
+    ├── scalar/arrow_scalar_store.cpp
+    ├── planner/planner.cpp
+    ├── core/cluster_reduce.cpp
+    ├── core/engine.cpp
+    ├── pq/pq_scanner.cpp
+    ├── pq/simd_transpose.cpp
+    ├── io/refiner_mmap.cpp
+    ├── io/refiner_io_uring.cpp
+    ├── index/build_layout.cpp
+    └── update/update_manager.cpp
 ```
 
 ---
 
 ## 2. Dependencies
 
-Required dependencies:
-
+* CMake >= 3.20
 * C++20 compiler
 
-  * GCC >= 11 is recommended
-* CMake >= 3.20
+  * GCC >= 11 recommended
+  * Clang >= 14 recommended
 * OpenMP
-* FAISS CPU
-* Apache Arrow C++
-* Parquet C++
+* FAISS (CPU)
+* Apache Arrow + Parquet
 * yaml-cpp
 * liburing
 
-  * Optional, but recommended for SSD refinement
+  * Optional, required only if enabling the `io_uring` refiner
 
-Ubuntu example packages:
+### Ubuntu Example
 
 ```bash
 sudo apt-get update
@@ -65,160 +81,108 @@ sudo apt-get install -y \
   libarrow-dev libparquet-dev
 ```
 
-FAISS can be installed from source or through a package manager.
-
-If CMake cannot find FAISS automatically, set `CMAKE_PREFIX_PATH` manually:
+If FAISS is installed in a non-system path, configure CMake with:
 
 ```bash
-cmake .. \
-  -DCMAKE_PREFIX_PATH=/path/to/faiss/install
+cmake .. -DCMAKE_PREFIX_PATH=/path/to/faiss/install
 ```
 
 ---
 
 ## 3. Build
 
-Create a build directory and configure the project:
-
 ```bash
 mkdir -p build
 cd build
-
 cmake .. \
   -DCMAKE_BUILD_TYPE=Release \
-  -DPREDICATEPQ_ENABLE_IO_URING=ON \
-  -DPREDICATEPQ_ENABLE_TESTS=OFF
-```
-
-Build the binaries:
-
-```bash
+  -DPREDICATEPQ_ENABLE_IO_URING=ON
 make -j
 ```
 
-Generated binaries include:
-
-* `build_index`
-* `query_cli`
-* `benchmark`
-* `microbench_transpose`
-
----
-
-## 4. Build Index
-
-The input vector file format is raw `float32` binary.
-
-Expected shape:
+Output binary:
 
 ```text
-[ntotal * dim]
+build/predicatepq
 ```
-
-The vectors should be stored in row-major order.
-
-Command format:
-
-```bash
-./build_index \
-  <vec_fbin> <out_dir> <ntotal> <dim> \
-  <nlist> <pq_m> <pq_nbits> <train_n> \
-  <scalar_parquet_or_->
-```
-
-Example:
-
-```bash
-./build_index \
-  ./data/base.fbin ./out_index \
-  1000000 128 \
-  4096 16 8 200000 \
-  ./data/scalar.parquet
-```
-
-Output artifacts include:
-
-* `ivfpq.faiss`
-* `pq_codes_rowwise.bin`
-* `vectors_clustered.fbin`
-* `id_to_cluster.bin`
-* `id_to_disk_offset.bin`
-* `coarse_centroids.fbin`
-* `cluster_offsets.bin`
-* `scalar_original.arrow`
-* `scalar_clustered.arrow`
-
-`scalar_original.arrow` and `scalar_clustered.arrow` are generated only when a valid Parquet scalar file is provided.
 
 ---
 
-## 5. Query
+## 4. Run
 
-Command format:
-
-```bash
-./query_cli \
-  <index_dir> <query_fbin> <qid> <topk> <use_io_uring:0|1> "<predicate_sql>"
-```
-
-Example:
+### Help
 
 ```bash
-./query_cli \
-  ./out_index ./data/query.fbin \
-  0 100 1 \
-  "price >= 100 AND category IN ('shoe','coat')"
+./build/predicatepq --help
 ```
 
-Supported predicate operators in the scalar engine:
+### Version
 
-| Category       | Operators                       |
-| -------------- | ------------------------------- |
-| Comparison     | `=`, `!=`, `<`, `<=`, `>`, `>=` |
-| Set membership | `IN (...)`                      |
-| Logical        | `AND`, `OR`                     |
-| Grouping       | `( ... )`                       |
+```bash
+./build/predicatepq --version
+```
+
+### Basic Execution
+
+Prototype sanity run:
+
+```bash
+./build/predicatepq run --config configs/default.yaml
+```
+
+This `run` command performs:
+
+* Config loading from YAML
+* Predicate parser/evaluator quick check (`AND` / `OR` / `IN`)
+* SIMD transpose quick check
 
 ---
 
-## 6. Configuration
+## 5. Configuration
 
-Runtime defaults are provided in:
+Default config file:
 
 ```text
 configs/default.yaml
 ```
 
-The configuration file includes defaults for:
+Key sections:
 
-* Planner behavior
-* PQ scan behavior
-* Refinement scheduling
-* SIMD-related options
-* Update behavior
-* I/O options
+* `index`
+* `planner`
+* `engine`
+* `refiner`
+* `simd`
+* `update`
 
-Users can modify this file to tune query execution, scan parameters, refinement strategy, and update-path behavior.
+You can tune planner thresholds, probe budget, queue depth, and update/compaction policy in this file.
 
 ---
 
-## 7. Notes
+## 6. Notes
 
-The `io_uring` refiner currently defaults to buffered I/O.
+If you get the following error:
 
-To enable direct I/O, explicitly configure `use_o_direct` and ensure that alignment constraints are correctly handled.
+```text
+cannot open include file <yaml-cpp/yaml.h>
+```
 
-For best performance on NUMA machines:
+Install `libyaml-cpp-dev`, then re-run CMake configure:
 
-* Pin worker threads.
-* Place data on local NUMA nodes.
-* Avoid cross-socket memory access when possible.
+```bash
+sudo apt-get install -y libyaml-cpp-dev
+cmake ..
+```
 
-This prototype focuses on the retrieval path and reproducible systems behavior, including:
+Additional notes:
 
-* Hybrid predicate-vector query execution
-* Planner-controlled pre-filtering and post-filtering
-* Cluster-aware pruning
-* PQ scan optimization
-* SSD-based vector refinement
-* Update handling through delta buffer, tombstones, and compaction
+* The `io_uring` path requires Linux kernel/runtime support.
+* The current prototype focuses on the core execution path and reproducibility, not production hardening.
+
+---
+
+## 7. License
+
+Research prototype.
+
+Add your preferred license file, such as MIT or Apache-2.0, before public release.
