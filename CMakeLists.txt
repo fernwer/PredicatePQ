@@ -7,7 +7,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
 
 option(PREDICATEPQ_ENABLE_IO_URING "Enable io_uring refiner" ON)
-option(PREDICATEPQ_ENABLE_TESTS "Build tests" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -24,7 +23,7 @@ if(PREDICATEPQ_ENABLE_IO_URING)
   find_library(URING_LIB uring REQUIRED)
 endif()
 
-add_library(predicatepq
+add_library(predicatepq_core
   src/predicate/predicate.cpp
   src/scalar/arrow_scalar_store.cpp
   src/planner/planner.cpp
@@ -38,17 +37,16 @@ add_library(predicatepq
 )
 
 if(PREDICATEPQ_ENABLE_IO_URING)
-  target_sources(predicatepq PRIVATE src/io/refiner_io_uring.cpp)
-  target_compile_definitions(predicatepq PUBLIC PREDICATEPQ_USE_IO_URING=1)
-  target_link_libraries(predicatepq PUBLIC ${URING_LIB})
+  target_sources(predicatepq_core PRIVATE src/io/refiner_io_uring.cpp)
+  target_compile_definitions(predicatepq_core PUBLIC PREDICATEPQ_USE_IO_URING=1)
+  target_link_libraries(predicatepq_core PUBLIC ${URING_LIB})
 endif()
 
-target_include_directories(predicatepq
-  PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+target_include_directories(predicatepq_core
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(predicatepq
+target_link_libraries(predicatepq_core
   PUBLIC
     Threads::Threads
     OpenMP::OpenMP_CXX
@@ -58,30 +56,14 @@ target_link_libraries(predicatepq
     yaml-cpp
 )
 
-# 可执行程序
-add_executable(build_index apps/build_index.cpp)
-target_link_libraries(build_index PRIVATE predicatepq)
+add_executable(predicatepq src/main.cpp)
+target_link_libraries(predicatepq PRIVATE predicatepq_core)
 
-add_executable(query_cli apps/query_cli.cpp)
-target_link_libraries(query_cli PRIVATE predicatepq)
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/apps/benchmark.cpp")
-  add_executable(benchmark apps/benchmark.cpp)
-  target_link_libraries(benchmark PRIVATE predicatepq)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/apps/microbench_transpose.cpp")
-  add_executable(microbench_transpose apps/microbench_transpose.cpp)
-  target_link_libraries(microbench_transpose PRIVATE predicatepq)
-endif()
-
-# 编译优化
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(predicatepq PRIVATE -O3 -march=native -fopenmp)
+  target_compile_options(predicatepq_core PRIVATE -O3 -march=native -fopenmp)
 endif()
 
-# 安装（可选）
-install(TARGETS predicatepq build_index query_cli
+install(TARGETS predicatepq predicatepq_core
   RUNTIME DESTINATION bin
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib

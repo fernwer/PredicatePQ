@@ -31,9 +31,6 @@
 !configs
 !configs/**
 
-!apps
-!apps/**
-
 !cmake
 !cmake/**
 
